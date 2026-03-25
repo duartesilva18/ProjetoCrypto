@@ -34,6 +34,14 @@ export default function EventsPage() {
   const [events, setEvents] = useState<BotEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [levelFilter, setLevelFilter] = useState<string>("ALL");
+  const [strategyFilter, setStrategyFilter] = useState<string>("ALL");
+
+  const strategyComponents: Record<string, string[]> = {
+    ALL: [],
+    FUNDING: ["funding_arb", "funding_loop", "scheduler"],
+    GRID: ["grid"],
+    CARRY: ["carry"],
+  };
 
   function fetchEvents() {
     setLoading(true);
@@ -42,14 +50,21 @@ export default function EventsPage() {
 
     api
       .getEvents(params)
-      .then((res) => setEvents(res.data))
+      .then((res) => {
+        let data = res.data;
+        if (strategyFilter !== "ALL") {
+          const comps = strategyComponents[strategyFilter] ?? [];
+          data = data.filter((e) => comps.includes(e.component));
+        }
+        setEvents(data);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }
 
   useEffect(() => {
     fetchEvents();
-  }, [levelFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [levelFilter, strategyFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -60,7 +75,7 @@ export default function EventsPage() {
             {events.length} event{events.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Filter className="h-4 w-4 text-zinc-500" />
           {levels.map((l) => (
             <Button
@@ -71,6 +86,18 @@ export default function EventsPage() {
               className="h-7 text-xs"
             >
               {l}
+            </Button>
+          ))}
+          <div className="h-4 w-px bg-zinc-700" />
+          {["ALL", "FUNDING", "GRID", "CARRY"].map((s) => (
+            <Button
+              key={s}
+              variant={strategyFilter === s ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setStrategyFilter(s)}
+              className="h-7 text-xs"
+            >
+              {s}
             </Button>
           ))}
           <Button
@@ -109,11 +136,25 @@ export default function EventsPage() {
                   <Badge variant={levelVariant(event.level)} className="mt-0.5 shrink-0">
                     {event.level}
                   </Badge>
+                  <Badge
+                    variant={
+                      event.component === "grid" ? "warning" :
+                      event.component === "carry" ? "info" :
+                      event.component === "funding_arb" || event.component === "funding_loop" ? "success" :
+                      "default"
+                    }
+                    className="mt-0.5 shrink-0"
+                  >
+                    {event.component === "funding_arb" || event.component === "funding_loop"
+                      ? "FUNDING"
+                      : event.component === "grid"
+                        ? "GRID"
+                        : event.component === "carry"
+                          ? "CARRY"
+                          : event.component.toUpperCase()}
+                  </Badge>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-mono text-zinc-400">
-                        [{event.component}]
-                      </span>
                       <span className="text-sm text-zinc-200">
                         {event.message}
                       </span>

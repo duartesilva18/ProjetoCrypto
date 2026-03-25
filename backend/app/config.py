@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     okx_api_key: str = ""
     okx_api_secret: str = ""
     okx_passphrase: str = ""
+    gate_api_key: str = ""
+    gate_api_secret: str = ""
 
     # ── Strategy ──────────────────────────────
     funding_rate_entry_threshold: float = 0.0001
@@ -79,6 +81,13 @@ class Settings(BaseSettings):
     # ── Auth ──────────────────────────────────
     jwt_secret: str = "CHANGE_ME_IN_PRODUCTION"
     dashboard_password: str = "admin"
+
+    # ── Telegram ──────────────────────────────
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
+    # ── Funding Loop ──────────────────────────
+    funding_loop_interval_seconds: float = 60.0
 
 
 @lru_cache(maxsize=1)

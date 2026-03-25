@@ -2,9 +2,17 @@
 
 Scans all exchanges/symbols for attractive funding rates,
 scores opportunities, validates risk, and emits entry/exit signals.
+
+Multi-exchange comparison: for each symbol, picks the exchange with
+the best funding rate rather than evaluating each independently.
+
+Dynamic position sizing: scales position size based on opportunity
+score and available capital instead of using a fixed $100 notional.
 """
 
 from __future__ import annotations
+
+from collections import defaultdict
 
 import structlog
 
@@ -14,6 +22,9 @@ from app.core.strategy.scoring import score_opportunity
 from app.core.strategy.signals import Opportunity, Signal
 
 logger = structlog.get_logger(__name__)
+
+_BASE_POSITION_SIZE_USD = 200.0
+_MAX_CAPITAL_FRACTION = 0.10
 
 
 class FundingArbStrategy:
@@ -42,7 +53,7 @@ class FundingArbStrategy:
         """Run one evaluation cycle.
 
         1. Scan funding rates for entry opportunities
-        2. Score and rank them
+        2. Score and rank them (best exchange per symbol)
         3. Validate top candidate against risk
         4. Check existing positions for exit
         5. Return the best signal (or HOLD)
@@ -50,7 +61,9 @@ class FundingArbStrategy:
         if risk_manager.circuit_breaker.is_tripped:
             return Signal.hold(reason="Circuit breaker is OPEN")
 
-        entry_signal = await self._scan_entries(state, risk_manager)
+        open_keys = {f"{p.get('exchange')}:{p.get('symbol')}" for p in open_positions}
+
+        entry_signal = await self._scan_entries(state, risk_manager, open_keys)
         if entry_signal is not None:
             return entry_signal
 
@@ -60,14 +73,24 @@ class FundingArbStrategy:
 
         return Signal.hold()
 
-    async def _scan_entries(self, state: StateStore, risk_manager: RiskManager) -> Signal | None:
-        """Scan all symbols on all exchanges for entry opportunities."""
-        opportunities: list[Opportunity] = []
+    async def _scan_entries(
+        self,
+        state: StateStore,
+        risk_manager: RiskManager,
+        open_keys: set[str] | None = None,
+    ) -> Signal | None:
+        """Scan all symbols across exchanges, pick best exchange per symbol."""
+        open_keys = open_keys or set()
+        candidates_by_symbol: defaultdict[str, list[Opportunity]] = defaultdict(list)
 
         for symbol in self._symbols:
             rates = await state.get_funding_rates_for_symbol(symbol)
 
             for key, data in rates.items():
+                exchange = data.get("exchange", key.split(":")[0])
+                if f"{exchange}:{symbol}" in open_keys:
+                    continue
+
                 try:
                     rate = float(data.get("funding_rate", 0))
                 except (TypeError, ValueError):
@@ -79,7 +102,6 @@ class FundingArbStrategy:
                 predicted = _safe_float(data.get("predicted_rate"))
                 ttf = _safe_float(data.get("time_to_funding_s"))
                 spread = _safe_float(data.get("spread_bps")) or 0.0
-                exchange = data.get("exchange", key.split(":")[0])
 
                 opp_score = score_opportunity(
                     funding_rate=rate,
@@ -89,7 +111,7 @@ class FundingArbStrategy:
                 )
 
                 if opp_score >= self._min_score:
-                    opportunities.append(
+                    candidates_by_symbol[symbol].append(
                         Opportunity(
                             exchange=exchange,
                             symbol=symbol,
@@ -101,15 +123,30 @@ class FundingArbStrategy:
                         )
                     )
 
-        if not opportunities:
+        best_per_symbol: list[Opportunity] = []
+        for symbol, candidates in candidates_by_symbol.items():
+            best = max(candidates, key=lambda o: (abs(o.funding_rate), o.score))
+            best_per_symbol.append(best)
+            if len(candidates) > 1:
+                others = [f"{c.exchange}={c.funding_rate:.6f}" for c in candidates if c is not best]
+                logger.debug(
+                    "multi_exchange_comparison",
+                    symbol=symbol,
+                    chosen=best.exchange,
+                    chosen_rate=best.funding_rate,
+                    alternatives=others,
+                )
+
+        if not best_per_symbol:
             return None
 
-        ranked = sorted(opportunities, key=lambda o: o.score, reverse=True)
+        ranked = sorted(best_per_symbol, key=lambda o: o.score, reverse=True)
 
         portfolio = risk_manager._portfolio
-        position_size = portfolio.total_capital * self._position_size_pct
+        capital = portfolio.total_capital
 
         for opp in ranked:
+            position_size = self._dynamic_size(opp.score, capital)
             if risk_manager.is_valid(opp, position_size):
                 logger.info(
                     "entry_signal",
@@ -117,10 +154,18 @@ class FundingArbStrategy:
                     symbol=opp.symbol,
                     score=opp.score,
                     rate=opp.funding_rate,
+                    position_size_usd=round(position_size, 2),
                 )
                 return Signal.entry(opp)
 
         return None
+
+    @staticmethod
+    def _dynamic_size(score: float, capital: float) -> float:
+        """Scale position size by opportunity score and available capital."""
+        score_multiplier = max(0.5, min(2.0, score / 0.5))
+        capital_alloc = capital * _MAX_CAPITAL_FRACTION
+        return min(capital_alloc, _BASE_POSITION_SIZE_USD * score_multiplier)
 
     async def _scan_exits(self, state: StateStore, open_positions: list[dict]) -> Signal | None:
         """Check if any open position should be closed."""

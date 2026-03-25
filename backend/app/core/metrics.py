@@ -7,7 +7,7 @@ from prometheus_client import Counter, Gauge, Histogram
 funding_payments_total = Counter(
     "funding_payments_total",
     "Total funding payments collected",
-    ["exchange", "symbol"],
+    ["exchange"],
 )
 
 trades_executed_total = Counter(

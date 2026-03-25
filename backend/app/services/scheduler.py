@@ -18,6 +18,7 @@ from app.core.metrics import evaluation_cycle_duration_seconds, signals_generate
 from app.core.risk.manager import RiskManager
 from app.core.strategy.funding_arb import FundingArbStrategy
 from app.core.strategy.signals import SignalType
+from app.services.event_logger import EventLogger
 
 logger = structlog.get_logger(__name__)
 
@@ -33,11 +34,13 @@ class BotScheduler:
         risk_manager: RiskManager,
         executor: PaperExecutor,
         state: StateStore,
+        event_logger: EventLogger | None = None,
     ) -> None:
         self._strategy = strategy
         self._risk = risk_manager
         self._executor = executor
         self._state = state
+        self._event_logger = event_logger
         self._running = False
         self._task: asyncio.Task | None = None
         self._tick_count: int = 0
@@ -98,7 +101,12 @@ class BotScheduler:
         signals_generated_total.labels(type=signal.type.value).inc()
 
         if signal.type != SignalType.HOLD:
-            result = await self._executor.execute_signal(signal)
+            size_usd = None
+            if signal.opportunity is not None:
+                capital = self._risk._portfolio.total_capital
+                size_usd = self._strategy._dynamic_size(signal.opportunity.score, capital)
+
+            result = await self._executor.execute_signal(signal, position_size_usd=size_usd)
             if result is not None:
                 logger.info(
                     "signal_executed",
@@ -106,6 +114,36 @@ class BotScheduler:
                     position_id=result.id,
                     reason=signal.reason,
                 )
+                if self._event_logger:
+                    await self._log_signal_event(signal, result, size_usd)
 
         elapsed = time.monotonic() - start
         evaluation_cycle_duration_seconds.observe(elapsed)
+
+    async def _log_signal_event(self, signal, result, size_usd) -> None:
+        if signal.type == SignalType.ENTRY and signal.opportunity:
+            opp = signal.opportunity
+            await self._event_logger.info(
+                "scheduler",
+                f"Position opened: {opp.exchange}:{opp.symbol}"
+                f" | {result.side} | ${size_usd or 0:.2f}"
+                f" | score={opp.score:.3f} | rate={opp.funding_rate:.6f}",
+                position_id=result.id,
+                exchange=opp.exchange,
+                symbol=opp.symbol,
+                side=result.side,
+                size_usd=round(size_usd or 0, 2),
+                score=opp.score,
+                rate=opp.funding_rate,
+            )
+        elif signal.type == SignalType.EXIT:
+            await self._event_logger.info(
+                "scheduler",
+                f"Position closed: {result.exchange}:{result.symbol}"
+                f" | funding=${result.funding_collected:.4f}"
+                f" | reason: {signal.reason}",
+                position_id=result.id,
+                exchange=result.exchange,
+                symbol=result.symbol,
+                funding_collected=round(result.funding_collected, 6),
+            )

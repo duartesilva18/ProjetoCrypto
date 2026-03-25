@@ -2,10 +2,10 @@
 
 Factors:
   1. Funding rate magnitude   (40%) -- higher |rate| = better
-  2. Predicted next rate      (20%) -- consistency signal
+  2. Predicted next rate      (30%) -- consistency signal / early entry
   3. Time to next funding     (15%) -- prefer entering before settlement
-  4. Spread / slippage        (15%) -- tighter spread = cheaper entry
-  5. Historical rate stability(10%) -- steadier rates are more reliable
+  4. Spread / slippage        (10%) -- tighter spread = cheaper entry
+  5. Historical rate stability( 5%) -- steadier rates are more reliable
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ from dataclasses import dataclass
 @dataclass(slots=True)
 class ScoringWeights:
     rate_magnitude: float = 0.40
-    predicted_rate: float = 0.20
+    predicted_rate: float = 0.30
     time_to_funding: float = 0.15
-    spread: float = 0.15
-    stability: float = 0.10
+    spread: float = 0.10
+    stability: float = 0.05
 
 
 _RATE_NORMALIZER = 0.001

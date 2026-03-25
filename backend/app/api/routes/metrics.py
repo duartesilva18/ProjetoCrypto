@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -86,4 +87,94 @@ async def get_equity_curve(
             }
             for r in rows
         ],
+    }
+
+
+@router.get("/analytics")
+async def get_analytics(
+    _auth: AuthDep,
+    db: DbDep,
+    period: Annotated[str, Query(pattern="^(daily|monthly|yearly)$")] = "daily",
+    days: Annotated[int, Query(ge=1, le=365)] = 30,
+) -> dict:
+    """P&L analytics with per-strategy breakdown over time.
+
+    Returns cumulative P&L line data for each strategy, grouped by
+    day, month, or year. Data comes from both DB funding_payments
+    and live paper position profits.
+    """
+    from app.main import get_paper_executor
+
+    now = datetime.now(UTC)
+    since = now - timedelta(days=days)
+
+    if period == "monthly":
+        trunc_fn = func.date_trunc("month", FundingPayment.timestamp)
+    elif period == "yearly":
+        trunc_fn = func.date_trunc("year", FundingPayment.timestamp)
+    else:
+        trunc_fn = func.date_trunc("day", FundingPayment.timestamp)
+
+    stmt = (
+        select(
+            trunc_fn.label("period"),
+            FundingPayment.exchange,
+            func.coalesce(func.sum(FundingPayment.payment), 0).label("total_pnl"),
+        )
+        .where(FundingPayment.timestamp >= since)
+        .group_by("period", FundingPayment.exchange)
+        .order_by("period")
+    )
+    rows = (await db.execute(stmt)).all()
+
+    series: dict[str, list[dict]] = defaultdict(list)
+    period_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+
+    for row in rows:
+        ts = row.period.isoformat() if row.period else ""
+        period_totals[ts]["funding_arb"] += float(row.total_pnl)
+
+    paper = get_paper_executor()
+    if paper is not None:
+        for pos in paper.all_positions:
+            strategy = getattr(pos, "strategy", "funding_arb")
+            opened = pos.opened_at
+
+            if period == "monthly":
+                key = opened.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            elif period == "yearly":
+                key = opened.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            else:
+                key = opened.replace(hour=0, minute=0, second=0, microsecond=0)
+
+            ts = key.isoformat()
+            period_totals[ts][strategy] += pos.funding_collected
+
+    all_strategies = ["funding_arb", "grid", "carry"]
+    sorted_periods = sorted(period_totals.keys())
+
+    cumulative = {s: 0.0 for s in all_strategies}
+    combined_total = 0.0
+
+    for ts in sorted_periods:
+        point: dict = {"period": ts}
+        for strat in all_strategies:
+            amount = period_totals[ts].get(strat, 0.0)
+            cumulative[strat] += amount
+            point[strat] = round(cumulative[strat], 6)
+            combined_total += amount
+        point["total"] = round(sum(cumulative[s] for s in all_strategies), 6)
+        series["data"].append(point)
+
+    strategy_summary = {}
+    for strat in all_strategies:
+        strategy_summary[strat] = round(cumulative[strat], 6)
+    strategy_summary["total"] = round(combined_total, 6)
+
+    return {
+        "period": period,
+        "days": days,
+        "strategies": all_strategies,
+        "summary": strategy_summary,
+        "data": series.get("data", []),
     }

@@ -89,10 +89,9 @@ def upgrade() -> None:
         sa.Column("fee", sa.Numeric(18, 8), server_default="0"),
         sa.Column("order_id", sa.String(100)),
         sa.Column("is_paper", sa.Boolean(), server_default="true"),
-        sa.PrimaryKeyConstraint("id"),
+        sa.PrimaryKeyConstraint("id", "timestamp"),
     )
     op.create_index("ix_trades_position_id", "trades", ["position_id"])
-    op.create_index("ix_trades_timestamp", "trades", ["timestamp"])
 
     # ── funding_payments (hypertable) ─────────
     op.create_table(
@@ -104,7 +103,7 @@ def upgrade() -> None:
         sa.Column("symbol", sa.String(30), nullable=False),
         sa.Column("payment", sa.Numeric(18, 8), nullable=False),
         sa.Column("rate", sa.Numeric(18, 10), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
+        sa.PrimaryKeyConstraint("id", "timestamp"),
     )
     op.create_index(
         "ix_funding_payments_position_id", "funding_payments", ["position_id"]
@@ -135,7 +134,7 @@ def upgrade() -> None:
         sa.Column("component", sa.String(50), nullable=False),
         sa.Column("message", sa.Text(), nullable=False),
         sa.Column("metadata", JSONB()),
-        sa.PrimaryKeyConstraint("id"),
+        sa.PrimaryKeyConstraint("id", "timestamp"),
     )
     op.create_index("ix_bot_events_level", "bot_events", ["level"])
     op.create_index("ix_bot_events_component", "bot_events", ["component"])

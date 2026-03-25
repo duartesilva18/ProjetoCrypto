@@ -8,6 +8,7 @@ import {
   Activity,
   BarChart3,
   Layers,
+  LineChart,
   ScrollText,
   Settings,
   Wifi,
@@ -16,6 +17,7 @@ import {
 
 const navigation = [
   { name: "Overview", href: "/", icon: BarChart3 },
+  { name: "Analytics", href: "/analytics", icon: LineChart },
   { name: "Positions", href: "/positions", icon: Layers },
   { name: "Events", href: "/events", icon: ScrollText },
   { name: "Settings", href: "/settings", icon: Settings },
@@ -38,7 +40,7 @@ export function Sidebar() {
         <div>
           <span className="text-sm font-bold text-white">ProjetoCrypto</span>
           <p className="text-[10px] uppercase tracking-wider text-zinc-500">
-            Funding Arb Bot
+            Multi-Strategy Bot
           </p>
         </div>
       </div>

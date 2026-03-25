@@ -29,6 +29,7 @@ class PaperPosition:
     exchange: str = ""
     symbol: str = ""
     side: str = "LONG_SPOT_SHORT_PERP"
+    strategy: str = "funding_arb"
     spot_qty: float = 0.0
     perp_qty: float = 0.0
     entry_price_spot: float = 0.0
@@ -51,6 +52,7 @@ class PaperPosition:
             "exchange": self.exchange,
             "symbol": self.symbol,
             "side": self.side,
+            "strategy": self.strategy,
             "spot_qty": self.spot_qty,
             "perp_qty": self.perp_qty,
             "entry_price_spot": self.entry_price_spot,
@@ -86,16 +88,27 @@ class PaperExecutor:
     def get_open_positions_as_dicts(self) -> list[dict]:
         return [p.to_dict() for p in self.open_positions]
 
-    async def execute_signal(self, signal: Signal) -> PaperPosition | None:
+    async def execute_signal(
+        self,
+        signal: Signal,
+        position_size_usd: float | None = None,
+    ) -> PaperPosition | None:
         """Execute a signal in paper mode."""
         if signal.type == SignalType.ENTRY and signal.opportunity is not None:
-            return await self._execute_entry(signal.opportunity)
+            return await self._execute_entry(
+                signal.opportunity,
+                size_usd=position_size_usd or 100.0,
+            )
         if signal.type == SignalType.EXIT and signal.position_id is not None:
             return await self._execute_exit(signal.position_id)
         return None
 
-    async def _execute_entry(self, opp: Opportunity) -> PaperPosition | None:
-        """Simulate opening a hedged position."""
+    async def _execute_entry(
+        self,
+        opp: Opportunity,
+        size_usd: float = 100.0,
+    ) -> PaperPosition | None:
+        """Simulate opening a hedged position with dynamic sizing."""
         ticker = await self._state.get_ticker(opp.exchange, opp.symbol)
         if ticker is None:
             logger.warning("paper_entry_no_ticker", exchange=opp.exchange, symbol=opp.symbol)
@@ -113,9 +126,7 @@ class PaperExecutor:
         spot_entry = ask * (1 + self._slippage_bps / 10_000)
         perp_entry = bid * (1 - self._slippage_bps / 10_000)
 
-        qty = 1.0
-        if spot_entry > 0:
-            qty = round(100.0 / spot_entry, 8)
+        qty = round(size_usd / spot_entry, 8) if spot_entry > 0 else 1.0
 
         side = "LONG_SPOT_SHORT_PERP" if opp.funding_rate > 0 else "SHORT_SPOT_LONG_PERP"
 
@@ -137,6 +148,7 @@ class PaperExecutor:
             symbol=opp.symbol,
             side=side,
             qty=qty,
+            size_usd=round(size_usd, 2),
             spot_price=spot_entry,
             perp_price=perp_entry,
         )

@@ -1,4 +1,5 @@
 import type {
+  AnalyticsResponse,
   BotEvent,
   BotStatus,
   EquityPoint,
@@ -85,4 +86,9 @@ export const api = {
       `/api/v1/events${qs}`
     );
   },
+
+  getAnalytics: (period = "daily", days = 30) =>
+    request<AnalyticsResponse>(
+      `/api/v1/metrics/analytics?period=${period}&days=${days}`
+    ),
 };

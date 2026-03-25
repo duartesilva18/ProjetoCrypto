@@ -27,9 +27,19 @@ async def list_positions(
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict:
-    """List positions with optional filters."""
-    stmt = select(Position).order_by(Position.opened_at.desc())
+    """List positions -- merges DB positions with live paper positions."""
+    from app.main import get_paper_executor
 
+    paper = get_paper_executor()
+    paper_positions = []
+    if paper is not None:
+        for p in paper.all_positions:
+            d = p.to_dict()
+            d["status"] = "OPEN" if p.is_open else "CLOSED"
+            d["is_paper"] = True
+            paper_positions.append(d)
+
+    stmt = select(Position).order_by(Position.opened_at.desc())
     if status_filter is not None:
         stmt = stmt.where(Position.status == status_filter)
     if exchange:
@@ -38,22 +48,37 @@ async def list_positions(
         stmt = stmt.where(Position.symbol == symbol)
 
     count_stmt = select(func.count()).select_from(stmt.subquery())
-    total = (await db.execute(count_stmt)).scalar() or 0
+    db_total = (await db.execute(count_stmt)).scalar() or 0
 
     stmt = stmt.offset(offset).limit(limit)
     rows = (await db.execute(stmt)).scalars().all()
+    db_positions = [_serialize_position(p) for p in rows]
+
+    all_positions = paper_positions + db_positions
+    total = len(paper_positions) + db_total
 
     return {
         "total": total,
         "limit": limit,
         "offset": offset,
-        "data": [_serialize_position(p) for p in rows],
+        "data": all_positions[:limit],
     }
 
 
 @router.get("/{position_id}")
 async def get_position(_auth: AuthDep, db: DbDep, position_id: str) -> dict:
     """Get position detail with funding payment history."""
+    from app.main import get_paper_executor
+
+    paper = get_paper_executor()
+    if paper is not None:
+        for p in paper.all_positions:
+            if p.id == position_id:
+                d = p.to_dict()
+                d["status"] = "OPEN" if p.is_open else "CLOSED"
+                d["is_paper"] = True
+                return {"position": d, "funding_payments": []}
+
     stmt = select(Position).where(Position.id == position_id)
     pos = (await db.execute(stmt)).scalar_one_or_none()
 

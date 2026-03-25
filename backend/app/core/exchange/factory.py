@@ -5,12 +5,14 @@ from __future__ import annotations
 from app.core.exchange.base import BaseExchangeConnector
 from app.core.exchange.binance import BinanceConnector
 from app.core.exchange.bybit import BybitConnector
+from app.core.exchange.gate import GateConnector
 from app.core.exchange.okx import OKXConnector
 
 _REGISTRY: dict[str, type[BaseExchangeConnector]] = {
     "binance": BinanceConnector,
     "bybit": BybitConnector,
     "okx": OKXConnector,
+    "gate": GateConnector,
 }
 
 SUPPORTED_EXCHANGES: list[str] = list(_REGISTRY.keys())

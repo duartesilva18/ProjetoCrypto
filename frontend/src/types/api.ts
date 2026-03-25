@@ -20,6 +20,7 @@ export interface Position {
   exchange: string;
   symbol: string;
   side: string;
+  strategy?: string;
   spot_qty: number;
   perp_qty: number;
   entry_price_spot: number;
@@ -29,6 +30,12 @@ export interface Position {
   opened_at: string | null;
   closed_at: string | null;
   is_paper: boolean;
+  grid_low?: number;
+  grid_high?: number;
+  levels?: number;
+  trades_completed?: number;
+  entry_premium_bps?: number;
+  current_premium_bps?: number;
 }
 
 export interface PnlSummary {
@@ -65,4 +72,20 @@ export interface BotEvent {
   component: string;
   message: string;
   metadata: Record<string, unknown> | null;
+}
+
+export interface AnalyticsPoint {
+  period: string;
+  funding_arb: number;
+  grid: number;
+  carry: number;
+  total: number;
+}
+
+export interface AnalyticsResponse {
+  period: string;
+  days: number;
+  strategies: string[];
+  summary: Record<string, number>;
+  data: AnalyticsPoint[];
 }

@@ -28,11 +28,24 @@ const statusVariant = (s: string) => {
   }
 };
 
+const strategyLabel = (s?: string) => {
+  switch (s) {
+    case "grid":
+      return { label: "GRID", variant: "warning" as const, color: "text-amber-400" };
+    case "carry":
+      return { label: "CARRY", variant: "info" as const, color: "text-blue-400" };
+    case "funding_arb":
+    default:
+      return { label: "FUNDING", variant: "success" as const, color: "text-emerald-400" };
+  }
+};
+
 export default function PositionsPage() {
   const [positions, setPositions] = useState<Position[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string | null>(null);
+  const [strategyFilter, setStrategyFilter] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -44,7 +57,11 @@ export default function PositionsPage() {
       .getPositions(params)
       .then((res) => {
         if (mounted) {
-          setPositions(res.data);
+          let data = res.data;
+          if (strategyFilter) {
+            data = data.filter((p) => (p.strategy || "funding_arb") === strategyFilter);
+          }
+          setPositions(data);
           setTotal(res.total);
         }
       })
@@ -54,7 +71,7 @@ export default function PositionsPage() {
       });
 
     return () => { mounted = false; };
-  }, [filter]);
+  }, [filter, strategyFilter]);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -62,22 +79,43 @@ export default function PositionsPage() {
         <div>
           <h2 className="text-lg font-semibold text-white">Positions</h2>
           <p className="text-sm text-zinc-500">
-            {total} total position{total !== 1 ? "s" : ""}
+            {positions.length} position{positions.length !== 1 ? "s" : ""} shown
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Filter className="h-4 w-4 text-zinc-500" />
-          {["OPEN", "CLOSED", null].map((f) => (
-            <Button
-              key={f ?? "all"}
-              variant={filter === f ? "default" : "ghost"}
-              size="sm"
-              onClick={() => setFilter(f)}
-              className="h-7 text-xs"
-            >
-              {f ?? "All"}
-            </Button>
-          ))}
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-zinc-500" />
+            {["OPEN", "CLOSED", null].map((f) => (
+              <Button
+                key={f ?? "all"}
+                variant={filter === f ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setFilter(f)}
+                className="h-7 text-xs"
+              >
+                {f ?? "All"}
+              </Button>
+            ))}
+          </div>
+          <div className="h-4 w-px bg-zinc-700" />
+          <div className="flex items-center gap-1">
+            {[
+              { key: null, label: "All" },
+              { key: "funding_arb", label: "Funding" },
+              { key: "grid", label: "Grid" },
+              { key: "carry", label: "Carry" },
+            ].map((s) => (
+              <Button
+                key={s.key ?? "all-strat"}
+                variant={strategyFilter === s.key ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setStrategyFilter(s.key)}
+                className="h-7 text-xs"
+              >
+                {s.label}
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -104,6 +142,9 @@ export default function PositionsPage() {
                     {pos.symbol}
                   </CardTitle>
                   <Badge variant="default">{pos.exchange}</Badge>
+                  <Badge variant={strategyLabel(pos.strategy).variant}>
+                    {strategyLabel(pos.strategy).label}
+                  </Badge>
                   <Badge variant={statusVariant(pos.status)}>
                     {pos.status}
                   </Badge>
@@ -120,25 +161,45 @@ export default function PositionsPage() {
               <CardContent>
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-6">
                   <Metric
+                    label="Strategy"
+                    value={strategyLabel(pos.strategy).label}
+                    color={strategyLabel(pos.strategy).color}
+                  />
+                  <Metric
                     label="Side"
                     value={
-                      pos.side === "LONG_SPOT_SHORT_PERP"
-                        ? "Long Spot / Short Perp"
-                        : "Short Spot / Long Perp"
+                      pos.side === "GRID"
+                        ? "Grid (Buy & Sell)"
+                        : pos.side === "LONG_SPOT_SHORT_PERP"
+                          ? "Long Spot / Short Perp"
+                          : "Short Spot / Long Perp"
                     }
                   />
                   <Metric label="Spot Qty" value={pos.spot_qty.toFixed(6)} />
-                  <Metric label="Perp Qty" value={pos.perp_qty.toFixed(6)} />
+                  {pos.strategy === "grid" ? (
+                    <Metric
+                      label="Grid Range"
+                      value={`$${(pos.grid_low ?? 0).toFixed(2)} - $${(pos.grid_high ?? 0).toFixed(2)}`}
+                    />
+                  ) : (
+                    <Metric
+                      label="Entry (Spot)"
+                      value={formatCurrency(pos.entry_price_spot)}
+                    />
+                  )}
+                  {pos.strategy === "carry" ? (
+                    <Metric
+                      label="Premium"
+                      value={`${(pos.entry_premium_bps ?? 0).toFixed(1)} bps`}
+                    />
+                  ) : (
+                    <Metric
+                      label="Entry (Perp)"
+                      value={formatCurrency(pos.entry_price_perp)}
+                    />
+                  )}
                   <Metric
-                    label="Entry (Spot)"
-                    value={formatCurrency(pos.entry_price_spot)}
-                  />
-                  <Metric
-                    label="Entry (Perp)"
-                    value={formatCurrency(pos.entry_price_perp)}
-                  />
-                  <Metric
-                    label="Funding Collected"
+                    label={pos.strategy === "grid" ? "Grid Profit" : pos.strategy === "carry" ? "Carry Profit" : "Funding Collected"}
                     value={formatCurrency(pos.funding_collected)}
                     highlight
                   />
@@ -156,10 +217,12 @@ function Metric({
   label,
   value,
   highlight = false,
+  color,
 }: {
   label: string;
   value: string;
   highlight?: boolean;
+  color?: string;
 }) {
   return (
     <div>
@@ -168,7 +231,7 @@ function Metric({
       </p>
       <p
         className={`mt-0.5 text-sm font-mono ${
-          highlight ? "font-semibold text-emerald-400" : "text-zinc-200"
+          color ? `font-semibold ${color}` : highlight ? "font-semibold text-emerald-400" : "text-zinc-200"
         }`}
       >
         {value}
